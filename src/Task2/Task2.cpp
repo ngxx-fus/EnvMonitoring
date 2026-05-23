@@ -49,6 +49,15 @@ ClockState g_InternalClock = {2000U, 1U, 1U, 0U, 0U, 0U};
 uint32_t g_InternalClockBaseMs = 0U;
 bool g_NtpHostResolved = false;
 
+/* Display behavior controlled by BOOT0 button */
+enum class DisplayBehavior : uint8_t { SWAP = 0, FIX_ENV, FIX_TIME };
+DisplayBehavior g_DisplayBehavior = DisplayBehavior::SWAP;
+
+/* BOOT0 button debounce state */
+uint8_t g_BootLastState = HIGH;
+uint32_t g_BootLastChangeMs = 0U;
+constexpr uint32_t kBootDebounceMs = 50U;
+
 bool IsNtpTimeValid(void) {
   const uint16_t actualYear = (g_Year < 100U) ? static_cast<uint16_t>(2000U + g_Year) : g_Year;
   return (actualYear >= kClockSyncThresholdYear);
@@ -229,31 +238,44 @@ void DrawEnvInfo(void) {
 }
 
 void DrawTimeInfo(void) {
-  g_Display.setTextSize(2);
+    g_Display.setTextSize(2);
 
-  ClockState clock = g_InternalClock;
-  const char *statusText = GetStatusText(g_NetState);
-  if (IsNtpTimeValid()) {
-    clock = SnapshotTask1Time();
-    SyncInternalClockFromNtp();
-    statusText = nullptr;
-  }
+    ClockState clock = g_InternalClock;
+    const char *statusText = GetStatusText(g_NetState);
+    if (IsNtpTimeValid()) {
+        clock = SnapshotTask1Time();
+        SyncInternalClockFromNtp();
+        statusText = nullptr;
+    }
 
-  char timeText[20];
-  char dateText[20];
+    char topTime[20];
+    char midText[24];
+    char bottomTemp[24];
 
-  if (statusText != nullptr) {
-    snprintf(dateText, sizeof(dateText), "%s", statusText);
-    snprintf(timeText, sizeof(timeText), "%02u:%02u:%02u", clock.hour, clock.min, clock.sec);
-  } else {
-    snprintf(dateText, sizeof(dateText), "%02u/%02u/%04u", clock.day, clock.mon, clock.year);
-    snprintf(timeText, sizeof(timeText), "%02u:%02u:%02u", clock.hour, clock.min, clock.sec);
-  }
+    /* Top: always show time */
+    snprintf(topTime, sizeof(topTime), "%02u:%02u:%02u", clock.hour, clock.min, clock.sec);
 
-  g_Display.setCursor(0, 2);
-  g_Display.print(dateText);
-  g_Display.setCursor(0, 24);
-  g_Display.print(timeText);
+    /* Middle: show date when available, otherwise status text */
+    if (statusText != nullptr) {
+        snprintf(midText, sizeof(midText), "%s", statusText);
+    } else {
+        snprintf(midText, sizeof(midText), "%02u/%02u/%04u", clock.day, clock.mon, clock.year);
+    }
+
+    /* Bottom: temperature */
+    const float t = DHT11_GetTemperature(0U);
+    if (isnan(t)) {
+        snprintf(bottomTemp, sizeof(bottomTemp), "T: NaN");
+    } else {
+        snprintf(bottomTemp, sizeof(bottomTemp), "T: %.1foC", t);
+    }
+
+    g_Display.setCursor(0, 2);
+    g_Display.print(topTime);
+    g_Display.setCursor(0, 24);
+    g_Display.print(midText);
+    g_Display.setCursor(0, 48);
+    g_Display.print(bottomTemp);
 }
 
 }  // namespace
@@ -278,6 +300,11 @@ ReturnCode_t Task2_Init(void) {
   g_InternalClock = {2000U, 1U, 1U, 0U, 0U, 0U};
   g_InternalClockBaseMs = millis();
   g_NtpHostResolved = false;
+  /* Configure BOOT0 button pin for runtime mode switching */
+  pinMode(BOOT0_PIN, INPUT_PULLUP);
+  g_BootLastState = digitalRead(BOOT0_PIN);
+  g_BootLastChangeMs = millis();
+  g_DisplayBehavior = DisplayBehavior::SWAP;
 
   SystemLog("Task2 initialized (OLED 128x64)");
   return RET_OK;
@@ -290,9 +317,40 @@ ReturnCode_t Task2_Runtime(void) {
 
   g_NetState = DetectNetState(nowMs);
 
-  if ((nowMs - g_LastSwitchMs) >= modeDuration) {
-    g_Mode = (g_Mode == DisplayMode::ENV_INFO) ? DisplayMode::TIME_INFO : DisplayMode::ENV_INFO;
-    g_LastSwitchMs = nowMs;
+  /* Handle BOOT0 button presses (active low) with debounce and cycle display behavior */
+  const uint8_t bootState = digitalRead(BOOT0_PIN);
+  if (bootState != g_BootLastState) {
+    g_BootLastChangeMs = nowMs;
+    g_BootLastState = bootState;
+  } else if ((nowMs - g_BootLastChangeMs) >= kBootDebounceMs) {
+    static bool bootHandled = false;
+    if (bootState == LOW && !bootHandled) {
+      /* Button pressed: cycle behavior */
+      if (g_DisplayBehavior == DisplayBehavior::SWAP) {
+        g_DisplayBehavior = DisplayBehavior::FIX_ENV;
+        g_Mode = DisplayMode::ENV_INFO;
+        SystemLog("Display behavior: FIX_ENV");
+      } else if (g_DisplayBehavior == DisplayBehavior::FIX_ENV) {
+        g_DisplayBehavior = DisplayBehavior::FIX_TIME;
+        g_Mode = DisplayMode::TIME_INFO;
+        SystemLog("Display behavior: FIX_TIME");
+      } else {
+        g_DisplayBehavior = DisplayBehavior::SWAP;
+        g_LastSwitchMs = nowMs;
+        SystemLog("Display behavior: SWAP");
+      }
+      bootHandled = true;
+    } else if (bootState == HIGH) {
+      bootHandled = false;
+    }
+  }
+
+  /* Automatic switching only in SWAP mode */
+  if (g_DisplayBehavior == DisplayBehavior::SWAP) {
+    if ((nowMs - g_LastSwitchMs) >= modeDuration) {
+      g_Mode = (g_Mode == DisplayMode::ENV_INFO) ? DisplayMode::TIME_INFO : DisplayMode::ENV_INFO;
+      g_LastSwitchMs = nowMs;
+    }
   }
 
   if (!IsNtpTimeValid()) {

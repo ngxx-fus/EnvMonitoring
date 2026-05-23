@@ -24,3 +24,12 @@ const uint32_t TIME_UPDATE_INTERVAL_MS = 1000;
 
 const char WIFI_SSID[] = "P-209";
 const char WIFI_PASSWORD[] = "thinhngo888";
+const WiFiInfo_t WiFiList[] = {
+    {"P-209", "thinhngo888"},
+    {"ngxx-fus", "12357890"},
+};
+
+const uint8_t WiFiListCount = static_cast<uint8_t>(sizeof(WiFiList) / sizeof(WiFiList[0]));
+
+const uint8_t BOOT0_PIN = 0U;  // Typical ESP32 BOOT button pin (IO0)
+

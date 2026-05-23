@@ -22,6 +22,7 @@ constexpr int32_t kDaylightOffsetSeconds = 0;
 bool g_NtpConfigured = false;
 uint32_t g_LastSyncMs = 0U;
 uint32_t g_LastWifiRetryMs = 0U;
+uint8_t g_CurrentWifiIndex = 0U;
 
 ReturnCode_t EnsureWifiConnected(void) {
   if (WiFi.status() == WL_CONNECTED) {
@@ -34,9 +35,28 @@ ReturnCode_t EnsureWifiConnected(void) {
   }
   g_LastWifiRetryMs = nowMs;
 
-  SystemWarn("Wi-Fi disconnected, reconnecting...");
-  WiFi.disconnect();
-  WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
+  SystemWarn("Wi-Fi disconnected, trying configured networks...");
+  WiFi.disconnect(true);
+
+  const uint32_t perAttemptTimeout = 3000U;
+  for (uint8_t i = 0U; i < WiFiListCount; ++i) {
+    const uint8_t idx = i;  // always try from top to bottom
+    SystemLog("Trying Wi-Fi: %s", WiFiList[idx].SSID);
+    WiFi.begin(WiFiList[idx].SSID, WiFiList[idx].PASSWORD);
+
+    const uint32_t startMs = millis();
+    while ((WiFi.status() != WL_CONNECTED) && ((millis() - startMs) < perAttemptTimeout)) {
+      delay(200);
+    }
+
+    if (WiFi.status() == WL_CONNECTED) {
+      g_CurrentWifiIndex = idx;
+      SystemLog("Connected to %s", WiFiList[idx].SSID);
+      return RET_OK;
+    }
+  }
+
+  SystemWarn("All configured Wi-Fi networks failed");
   return RET_TIMEOUT;
 }
 
@@ -57,11 +77,22 @@ void ConfigureNtp(void) {
 
 ReturnCode_t Task1_Init(void) {
   WiFi.mode(WIFI_STA);
-  WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
-
-  const uint32_t startMs = millis();
-  while ((WiFi.status() != WL_CONNECTED) && ((millis() - startMs) < kWifiConnectTimeoutMs)) {
-    delay(250);
+  // Try configured Wi-Fi list in priority order during init.
+  WiFi.disconnect(true);
+  const uint32_t perAttemptTimeout = 5000U;
+  const uint32_t startInitMs = millis();
+  for (uint8_t i = 0U; i < WiFiListCount; ++i) {
+    SystemLog("Init: trying Wi-Fi %s", WiFiList[i].SSID);
+    WiFi.begin(WiFiList[i].SSID, WiFiList[i].PASSWORD);
+    const uint32_t startMs = millis();
+    while ((WiFi.status() != WL_CONNECTED) && ((millis() - startMs) < perAttemptTimeout) &&
+           ((millis() - startInitMs) < kWifiConnectTimeoutMs)) {
+      delay(200);
+    }
+    if (WiFi.status() == WL_CONNECTED) {
+      g_CurrentWifiIndex = i;
+      break;
+    }
   }
 
   if (WiFi.status() != WL_CONNECTED) {

@@ -46,4 +46,18 @@ extern const char WIFI_SSID[];
 /** @brief Wi-Fi password. */
 extern const char WIFI_PASSWORD[];
 
+/** @brief Wi-Fi list structure for multiple networks. */
+typedef struct {
+  char SSID[50];
+  char PASSWORD[16];
+} WiFiInfo_t;
+
+/** @brief Array of Wi-Fi entries. */
+extern const WiFiInfo_t WiFiList[];
+/** @brief Number of Wi-Fi entries in the array. */
+extern const uint8_t WiFiListCount;
+
+/** @brief BOOT0 button pin (useful for mode toggling). */
+extern const uint8_t BOOT0_PIN;
+
 #endif  // CONFIG_CONFIG_H
