@@ -24,6 +24,15 @@ The implementation uses the common ESP32 default I2C pins:
 - Falls back to an internal software clock when NTP is not yet available
 - Displays connection status text in the time screen while waiting for network or NTP data
 
+Additional behaviors implemented:
+
+- Multi-WiFi support: the firmware contains a prioritized `WiFiList` array. When disconnected it will try networks from top to bottom until one connects. Configure entries in `src/Config/Config.cpp`.
+- BOOT0 display behavior toggle: the device uses the physical BOOT0 (IO0) button to change OLED behavior. Press the button to cycle the display mode:
+  1. `SWAP` (default): automatic swap between ENV and TIME screens
+  2. `FIX_ENV`: fixed on the ENV screen
+  3. `FIX_TIME`: fixed on the TIME screen
+  Pressing again cycles back to `SWAP`.
+
 ## Project Structure
 
 The code is organized under `src` with module-style folders:
@@ -115,6 +124,10 @@ Before uploading, update these values in `src/Config/Config.cpp`:
 
 - `WIFI_SSID`
 - `WIFI_PASSWORD`
+
+For multiple networks, edit the `WiFiList` array in `src/Config/Config.cpp`. The code will attempt to connect to each entry in order if disconnected.
+
+The BOOT0 button (IO0) is used to change the OLED display behavior at runtime. It is configured as `BOOT0_PIN` in `src/Config/Config.cpp`.
 
 If your OLED uses a different I2C address or your board uses non-default I2C pins, update the corresponding values in `Config.cpp`.
 
