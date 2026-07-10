@@ -29,6 +29,13 @@ extern const uint8_t OLED128x64_ORIENTAL;
 /** @brief OLED background color: false=black, true=white. */
 extern const bool OLED128x64_BACKGROUND_COLOR;
 
+/** @brief Number of text lines on the OLED display. */
+extern const uint8_t OLED_TEXT_LINE_COUNT;
+/** @brief Y positions (baseline) for each text line on the OLED. */
+extern const uint8_t OLED_TEXT_LINE_Y[];
+/** @brief X positions for each text line on the OLED. */
+extern const uint8_t OLED_TEXT_LINE_X[];
+
 /** @brief Environment information screen duration. */
 extern const uint32_t DISP_ENV_INFO_SHOW_MS;
 /** @brief Date/time information screen duration. */
@@ -59,5 +66,12 @@ extern const uint8_t WiFiListCount;
 
 /** @brief BOOT0 button pin (useful for mode toggling). */
 extern const uint8_t BOOT0_PIN;
+
+/** @brief DS1302 CLK pin. */
+extern const uint8_t DS1302_CLK_PIN;
+/** @brief DS1302 DAT pin. */
+extern const uint8_t DS1302_DAT_PIN;
+/** @brief DS1302 RST (CE) pin. */
+extern const uint8_t DS1302_RST_PIN;
 
 #endif  // CONFIG_CONFIG_H

@@ -5,6 +5,7 @@
 #include "Task0/Task0.h"
 #include "Task1/Task1.h"
 #include "Task2/Task2.h"
+#include "Task4/Task4.h"
 
 /**
  * @brief Arduino setup entry.
@@ -17,6 +18,11 @@ void setup() {
 
   if (Task0_Init() != RET_OK) {
     SystemErr("Task0_Init failed");
+  }
+
+  // Init RTC module before other tasks that may use time
+  if (Task4_Init() != RET_OK) {
+    SystemErr("Task4_Init failed");
   }
 
   if (Task1_Init() != RET_OK) {
@@ -34,6 +40,7 @@ void setup() {
 void loop() {
   (void)Task0_Runtime();
   (void)Task1_Runtime();
+  (void)Task4_Runtime();
   (void)Task2_Runtime();
   delay(10);
 }

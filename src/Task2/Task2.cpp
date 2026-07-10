@@ -1,21 +1,17 @@
 #include "Task2.h"
 
-#include <Adafruit_GFX.h>
-#include <Adafruit_SSD1306.h>
 #include <WiFi.h>
+#include <U8g2lib.h>
 #include <Wire.h>
 #include <math.h>
 
 #include "../Log/Log.h"
 #include "../Task0/Task0.h"
 #include "../Task1/Task1.h"
+#include "Task4/Task4.h"
 
 namespace {
 
-constexpr uint8_t kScreenWidth = 128U;
-constexpr uint8_t kScreenHeight = 64U;
-constexpr int8_t kOledResetPin = -1;
-constexpr uint8_t kOledI2cAddress = 0x3C;
 constexpr uint32_t kClockSyncThresholdYear = 2025U;
 constexpr uint32_t kNetProbeIntervalMs = 5000U;
 
@@ -40,7 +36,7 @@ struct ClockState {
   uint8_t sec;
 };
 
-Adafruit_SSD1306 g_Display(kScreenWidth, kScreenHeight, &Wire, kOledResetPin);
+U8G2_SH1106_128X64_NONAME_F_HW_I2C g_Display(U8G2_R0, /* reset=*/ U8X8_PIN_NONE);
 DisplayMode g_Mode = DisplayMode::ENV_INFO;
 uint32_t g_LastSwitchMs = 0U;
 uint32_t g_LastNetProbeMs = 0U;
@@ -194,72 +190,50 @@ const char *GetStatusText(NetState state) {
 }
 
 void ApplyDisplayTheme(void) {
-  if (OLED128x64_BACKGROUND_COLOR) {
-    g_Display.fillScreen(SSD1306_WHITE);
-    g_Display.setTextColor(SSD1306_BLACK);
-  } else {
-    g_Display.fillScreen(SSD1306_BLACK);
-    g_Display.setTextColor(SSD1306_WHITE);
-  }
+  g_Display.setDrawColor(OLED128x64_BACKGROUND_COLOR ? 0 : 1);
 }
 
 void DrawEnvInfo(void) {
   char timeText[16];
-  ClockState clock = g_InternalClock;
-  if (IsNtpTimeValid()) {
-    clock = SnapshotTask1Time();
-    SyncInternalClockFromNtp();
-  }
+  const ClockState clock = g_InternalClock; // Use the already-synced internal clock
 
-  snprintf(timeText, sizeof(timeText), "%02u:%02u:%02u", clock.hour, clock.min, clock.sec);
-  g_Display.setTextSize(2);
-  g_Display.setCursor(0, 2);
-  g_Display.print(timeText);
+  snprintf(timeText, sizeof(timeText), "TIME: %02u:%02u:%02u", clock.hour, clock.min, clock.sec);
+  g_Display.setFont(u8g2_font_ncenB10_tr);
+  g_Display.drawStr(OLED_TEXT_LINE_X[0], OLED_TEXT_LINE_Y[0], timeText);
 
   const float h = DHT11_GetHumidity(0U);
   const float t = DHT11_GetTemperature(0U);
   char envText[24];
-  g_Display.setTextSize(2);
   if (isnan(h) || isnan(t)) {
     snprintf(envText, sizeof(envText), "T: NaN");
-    g_Display.setCursor(0, 24);
-    g_Display.print(envText);
+    g_Display.drawStr(OLED_TEXT_LINE_X[1], OLED_TEXT_LINE_Y[1], envText);
     snprintf(envText, sizeof(envText), "H: NaN");
-    g_Display.setCursor(0, 48);
-    g_Display.print(envText);
+    g_Display.drawStr(OLED_TEXT_LINE_X[2], OLED_TEXT_LINE_Y[2], envText);
   } else {
     snprintf(envText, sizeof(envText), "T: %.1foC", t);
-    g_Display.setCursor(0, 24);
-    g_Display.print(envText);
+    g_Display.drawStr(OLED_TEXT_LINE_X[1], OLED_TEXT_LINE_Y[1], envText);
     snprintf(envText, sizeof(envText), "H: %.1f%%", h);
-    g_Display.setCursor(0, 48);
-    g_Display.print(envText);
+    g_Display.drawStr(OLED_TEXT_LINE_X[2], OLED_TEXT_LINE_Y[2], envText);
   }
 }
 
 void DrawTimeInfo(void) {
-    g_Display.setTextSize(2);
-
-    ClockState clock = g_InternalClock;
+    const ClockState clock = g_InternalClock; // Use the already-synced internal clock
     const char *statusText = GetStatusText(g_NetState);
-    if (IsNtpTimeValid()) {
-        clock = SnapshotTask1Time();
-        SyncInternalClockFromNtp();
-        statusText = nullptr;
-    }
 
     char topTime[20];
     char midText[24];
     char bottomTemp[24];
 
+    g_Display.setFont(u8g2_font_ncenB10_tr);
     /* Top: always show time */
-    snprintf(topTime, sizeof(topTime), "%02u:%02u:%02u", clock.hour, clock.min, clock.sec);
+    snprintf(topTime, sizeof(topTime), "TIME: %02u:%02u:%02u", clock.hour, clock.min, clock.sec);
 
     /* Middle: show date when available, otherwise status text */
-    if (statusText != nullptr) {
+    if (statusText != nullptr && !IsNtpTimeValid()) {
         snprintf(midText, sizeof(midText), "%s", statusText);
     } else {
-        snprintf(midText, sizeof(midText), "%02u/%02u/%04u", clock.day, clock.mon, clock.year);
+        snprintf(midText, sizeof(midText), "DATE: %02u/%02u/%04u", clock.day, clock.mon, clock.year);
     }
 
     /* Bottom: temperature */
@@ -270,34 +244,42 @@ void DrawTimeInfo(void) {
         snprintf(bottomTemp, sizeof(bottomTemp), "T: %.1foC", t);
     }
 
-    g_Display.setCursor(0, 2);
-    g_Display.print(topTime);
-    g_Display.setCursor(0, 24);
-    g_Display.print(midText);
-    g_Display.setCursor(0, 48);
-    g_Display.print(bottomTemp);
+    g_Display.drawStr(OLED_TEXT_LINE_X[0], OLED_TEXT_LINE_Y[0], topTime);
+    g_Display.drawStr(OLED_TEXT_LINE_X[1], OLED_TEXT_LINE_Y[1], midText);
+    g_Display.drawStr(OLED_TEXT_LINE_X[2], OLED_TEXT_LINE_Y[2], bottomTemp);
 }
 
 }  // namespace
 
 ReturnCode_t Task2_Init(void) {
-  Wire.begin(OLED128x64_SDA_PIN, OLED128x64_SCL_PIN);
+  // For U8G2 HW_I2C, the address is often auto-detected.
+  // If needed, set the 7-bit address like this: g_Display.setI2CAddress(0x3C);
+  // Most common 128x64 OLEDs use address 0x3C.
+  // U8g2 library expects the 8-bit address, which is (7-bit address << 1).
+  g_Display.setI2CAddress(0x3C * 2);
 
-  if (!g_Display.begin(SSD1306_SWITCHCAPVCC, kOledI2cAddress)) {
+  g_Display.begin();
+  if (g_Display.getU8g2() == nullptr) {
     SystemErr("OLED init failed");
     return RET_FAIL;
   }
 
-  g_Display.setRotation(OLED128x64_ORIENTAL % 4U);
-  g_Display.cp437(true);
-  g_Display.clearDisplay();
-  g_Display.display();
+  // Clear the buffer and display an empty screen
+  g_Display.clearBuffer();
+  g_Display.sendBuffer();
+
+  g_Display.setFlipMode(OLED128x64_ORIENTAL % 2); // 0=no, 1=180deg
+  g_Display.setFontMode(OLED128x64_BACKGROUND_COLOR ? 0 : 1); // 0=solid, 1=transparent
 
   g_Mode = DisplayMode::ENV_INFO;
   g_LastSwitchMs = millis();
   g_LastNetProbeMs = 0U;
   g_NetState = NetState::WIFI_OFF;
   g_InternalClock = {2000U, 1U, 1U, 0U, 0U, 0U};
+  // Sync from RTC right at startup to have a valid time immediately
+  if (DS1302_IsAvailable()) {
+    DS1302_GetTime(&g_InternalClock.year, &g_InternalClock.mon, &g_InternalClock.day, &g_InternalClock.hour, &g_InternalClock.min, &g_InternalClock.sec);
+  }
   g_InternalClockBaseMs = millis();
   g_NtpHostResolved = false;
   /* Configure BOOT0 button pin for runtime mode switching */
@@ -353,20 +335,28 @@ ReturnCode_t Task2_Runtime(void) {
     }
   }
 
-  if (!IsNtpTimeValid()) {
-    AdvanceInternalClock(nowMs);
-  } else {
+  // Time synchronization priority: NTP > RTC > Internal Fallback
+  if (IsNtpTimeValid()) {
+    // Highest priority: NTP is valid, sync internal clock from it.
     SyncInternalClockFromNtp();
-  }
-
-  ApplyDisplayTheme();
-
-  if (g_Mode == DisplayMode::ENV_INFO) {
-    DrawEnvInfo();
+  } else if (DS1302_IsAvailable()) {
+    // Second priority: NTP not ready, but RTC is. Get time from RTC.
+    DS1302_GetTime(&g_InternalClock.year, &g_InternalClock.mon, &g_InternalClock.day, &g_InternalClock.hour, &g_InternalClock.min, &g_InternalClock.sec);
   } else {
-    DrawTimeInfo();
+    // Lowest priority: No external time source, advance the internal clock.
+    AdvanceInternalClock(nowMs);
   }
 
-  g_Display.display();
+  g_Display.firstPage();
+  do {
+    ApplyDisplayTheme();
+
+    if (g_Mode == DisplayMode::ENV_INFO) {
+      DrawEnvInfo();
+    } else {
+      DrawTimeInfo();
+    }
+  } while (g_Display.nextPage());
+
   return RET_OK;
 }
