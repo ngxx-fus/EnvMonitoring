@@ -10,7 +10,7 @@ const uint8_t OLED128x64_ORIENTAL = 0U;  // Rotation: 0..3
 const bool OLED128x64_BACKGROUND_COLOR = false;
 
 const uint8_t OLED_TEXT_LINE_COUNT = 3U;
-const uint8_t OLED_TEXT_LINE_Y[] = {14U, 34U, 58U}; // Y positions for line 1, 2, 3
+const uint8_t OLED_TEXT_LINE_Y[] = {14U, 34U, 54U}; // Y positions for line 1, 2, 3
 const uint8_t OLED_TEXT_LINE_X[] = {0U, 0U, 0U};   // X positions for line 1, 2, 3
 
 const uint32_t DISP_ENV_INFO_SHOW_MS = 5000;
@@ -35,7 +35,7 @@ const WiFiInfo_t WiFiList[] = {
 
 const uint8_t WiFiListCount = static_cast<uint8_t>(sizeof(WiFiList) / sizeof(WiFiList[0]));
 
-const uint8_t BOOT0_PIN = 0U;  // Typical ESP32 BOOT button pin (IO0)
+const uint8_t CHANGE_MODE_PIN = 0U;  // Typical ESP32 BOOT button pin (IO0)
 
 const uint8_t DS1302_CLK_PIN = 18U;
 const uint8_t DS1302_DAT_PIN = 19U;

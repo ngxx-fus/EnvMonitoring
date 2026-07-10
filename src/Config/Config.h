@@ -65,7 +65,7 @@ extern const WiFiInfo_t WiFiList[];
 extern const uint8_t WiFiListCount;
 
 /** @brief BOOT0 button pin (useful for mode toggling). */
-extern const uint8_t BOOT0_PIN;
+extern const uint8_t CHANGE_MODE_PIN;
 
 /** @brief DS1302 CLK pin. */
 extern const uint8_t DS1302_CLK_PIN;

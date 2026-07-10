@@ -127,7 +127,7 @@ Before uploading, update these values in `src/Config/Config.cpp`:
 
 For multiple networks, edit the `WiFiList` array in `src/Config/Config.cpp`. The code will attempt to connect to each entry in order if disconnected.
 
-The BOOT0 button (IO0) is used to change the OLED display behavior at runtime. It is configured as `BOOT0_PIN` in `src/Config/Config.cpp`.
+The BOOT0 button (IO0) is used to change the OLED display behavior at runtime. It is configured as `CHANGE_MODE_PIN` in `src/Config/Config.cpp`.
 
 If your OLED uses a different I2C address or your board uses non-default I2C pins, update the corresponding values in `Config.cpp`.
 

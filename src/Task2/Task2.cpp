@@ -8,6 +8,8 @@
 #include "../Log/Log.h"
 #include "../Task0/Task0.h"
 #include "../Task1/Task1.h"
+#include "../Common/TaskCommon.h"
+#include "../DisplayData/DisplayData.h"
 #include "Task4/Task4.h"
 
 namespace {
@@ -41,17 +43,15 @@ DisplayMode g_Mode = DisplayMode::ENV_INFO;
 uint32_t g_LastSwitchMs = 0U;
 uint32_t g_LastNetProbeMs = 0U;
 NetState g_NetState = NetState::WIFI_OFF;
-ClockState g_InternalClock = {2000U, 1U, 1U, 0U, 0U, 0U};
+ClockState g_InternalClock = {2026U, 1U, 1U, 0U, 0U, 0U};
 uint32_t g_InternalClockBaseMs = 0U;
 bool g_NtpHostResolved = false;
-
-/* Display behavior controlled by BOOT0 button */
-enum class DisplayBehavior : uint8_t { SWAP = 0, FIX_ENV, FIX_TIME };
-DisplayBehavior g_DisplayBehavior = DisplayBehavior::SWAP;
 
 /* BOOT0 button debounce state */
 uint8_t g_BootLastState = HIGH;
 uint32_t g_BootLastChangeMs = 0U;
+uint32_t g_BootPressStartMs = 0U;
+bool g_AutoUpdateEnabled = false;
 constexpr uint32_t kBootDebounceMs = 50U;
 
 bool IsNtpTimeValid(void) {
@@ -193,60 +193,51 @@ void ApplyDisplayTheme(void) {
   g_Display.setDrawColor(OLED128x64_BACKGROUND_COLOR ? 0 : 1);
 }
 
-void DrawEnvInfo(void) {
-  char timeText[16];
-  const ClockState clock = g_InternalClock; // Use the already-synced internal clock
-
-  snprintf(timeText, sizeof(timeText), "TIME: %02u:%02u:%02u", clock.hour, clock.min, clock.sec);
+void DrawLines(const char *lines[3]) {
   g_Display.setFont(u8g2_font_ncenB10_tr);
-  g_Display.drawStr(OLED_TEXT_LINE_X[0], OLED_TEXT_LINE_Y[0], timeText);
-
-  const float h = DHT11_GetHumidity(0U);
-  const float t = DHT11_GetTemperature(0U);
-  char envText[24];
-  if (isnan(h) || isnan(t)) {
-    snprintf(envText, sizeof(envText), "T: NaN");
-    g_Display.drawStr(OLED_TEXT_LINE_X[1], OLED_TEXT_LINE_Y[1], envText);
-    snprintf(envText, sizeof(envText), "H: NaN");
-    g_Display.drawStr(OLED_TEXT_LINE_X[2], OLED_TEXT_LINE_Y[2], envText);
-  } else {
-    snprintf(envText, sizeof(envText), "T: %.1foC", t);
-    g_Display.drawStr(OLED_TEXT_LINE_X[1], OLED_TEXT_LINE_Y[1], envText);
-    snprintf(envText, sizeof(envText), "H: %.1f%%", h);
-    g_Display.drawStr(OLED_TEXT_LINE_X[2], OLED_TEXT_LINE_Y[2], envText);
+  for (int i = 0; i < OLED_TEXT_LINE_COUNT; ++i) {
+    if (lines[i] != nullptr) {
+      g_Display.drawStr(OLED_TEXT_LINE_X[i], OLED_TEXT_LINE_Y[i], lines[i]);
+    }
   }
 }
 
-void DrawTimeInfo(void) {
-    const ClockState clock = g_InternalClock; // Use the already-synced internal clock
-    const char *statusText = GetStatusText(g_NetState);
+void UpdateDisplayData(void) {
+  char line1[32], line2[32], line3[32];
+  const float t = DHT11_GetTemperature(0U);
+  const float h = DHT11_GetHumidity(0U);
+  AppState_t currentState = Task_GetSystemState();
 
-    char topTime[20];
-    char midText[24];
-    char bottomTemp[24];
-
-    g_Display.setFont(u8g2_font_ncenB10_tr);
-    /* Top: always show time */
-    snprintf(topTime, sizeof(topTime), "TIME: %02u:%02u:%02u", clock.hour, clock.min, clock.sec);
-
-    /* Middle: show date when available, otherwise status text */
-    if (statusText != nullptr && !IsNtpTimeValid()) {
-        snprintf(midText, sizeof(midText), "%s", statusText);
+  // In MIX mode, alternate between TDT and TTH content
+  if (currentState == eAPP_STAT_RUN_MIX) {
+    if ((millis() / DISP_ENV_INFO_SHOW_MS) % 2 == 0) {
+      currentState = eAPP_STAT_RUN_TDT;
     } else {
-        snprintf(midText, sizeof(midText), "DATE: %02u/%02u/%04u", clock.day, clock.mon, clock.year);
+      currentState = eAPP_STAT_RUN_TTH;
     }
+  }
 
-    /* Bottom: temperature */
-    const float t = DHT11_GetTemperature(0U);
-    if (isnan(t)) {
-        snprintf(bottomTemp, sizeof(bottomTemp), "T: NaN");
-    } else {
-        snprintf(bottomTemp, sizeof(bottomTemp), "T: %.1foC", t);
-    }
+  snprintf(line1, sizeof(line1), "#: %02u:%02u:%02u", g_InternalClock.hour, g_InternalClock.min, g_InternalClock.sec);
 
-    g_Display.drawStr(OLED_TEXT_LINE_X[0], OLED_TEXT_LINE_Y[0], topTime);
-    g_Display.drawStr(OLED_TEXT_LINE_X[1], OLED_TEXT_LINE_Y[1], midText);
-    g_Display.drawStr(OLED_TEXT_LINE_X[2], OLED_TEXT_LINE_Y[2], bottomTemp);
+  if (currentState == eAPP_STAT_RUN_TDT) {
+    snprintf(line2, sizeof(line2), "D: %02u/%02u/%04u", g_InternalClock.day, g_InternalClock.mon, g_InternalClock.year);
+    snprintf(line3, sizeof(line3), "T: %.1foC", isnan(t) ? NAN : t);
+  } else if (currentState == eAPP_STAT_RUN_TTH) {
+    snprintf(line2, sizeof(line2), "T: %.1foC", isnan(t) ? NAN : t);
+    snprintf(line3, sizeof(line3), "H: %.1f%%", isnan(h) ? NAN : h);
+  }
+
+  DisplayData_UpdateString(0, line1);
+  DisplayData_UpdateString(1, line2);
+  DisplayData_UpdateString(2, line3);
+}
+
+void DrawScreenFromBuffer(void) {
+    char line1[32], line2[32], line3[32];
+    DisplayData_GetAllStrings(line1, line2, line3, sizeof(line1));
+    const char *lines[] = {line1, line2, line3};
+    Task2_DrawScreenLines(lines);
+    DisplayData_Commit();
 }
 
 }  // namespace
@@ -275,7 +266,7 @@ ReturnCode_t Task2_Init(void) {
   g_LastSwitchMs = millis();
   g_LastNetProbeMs = 0U;
   g_NetState = NetState::WIFI_OFF;
-  g_InternalClock = {2000U, 1U, 1U, 0U, 0U, 0U};
+  g_InternalClock = {2026U, 1U, 1U, 0U, 0U, 0U};
   // Sync from RTC right at startup to have a valid time immediately
   if (DS1302_IsAvailable()) {
     DS1302_GetTime(&g_InternalClock.year, &g_InternalClock.mon, &g_InternalClock.day, &g_InternalClock.hour, &g_InternalClock.min, &g_InternalClock.sec);
@@ -283,79 +274,130 @@ ReturnCode_t Task2_Init(void) {
   g_InternalClockBaseMs = millis();
   g_NtpHostResolved = false;
   /* Configure BOOT0 button pin for runtime mode switching */
-  pinMode(BOOT0_PIN, INPUT_PULLUP);
-  g_BootLastState = digitalRead(BOOT0_PIN);
+  pinMode(CHANGE_MODE_PIN, INPUT_PULLUP);
+  g_BootLastState = digitalRead(CHANGE_MODE_PIN);
   g_BootLastChangeMs = millis();
-  g_DisplayBehavior = DisplayBehavior::SWAP;
 
   SystemLog("Task2 initialized (OLED 128x64)");
   return RET_OK;
 }
 
 ReturnCode_t Task2_Runtime(void) {
-  const uint32_t nowMs = millis();
-  const uint32_t modeDuration =
-      (g_Mode == DisplayMode::ENV_INFO) ? DISP_ENV_INFO_SHOW_MS : DISP_TIME_INFO_SHOW_MS;
+  // This task is responsible for updating display data in RUN states
+  // and handling button presses to change states.
+  const AppState_t currentState = Task_GetSystemState();
+  if (currentState != eAPP_STAT_RUN_TDT && currentState != eAPP_STAT_RUN_TTH && currentState != eAPP_STAT_RUN_MIX) {
+    return RET_OK; // Do nothing if not in a display-active state
+  }
 
-  g_NetState = DetectNetState(nowMs);
+  // In AutoUpdate mode, Task2 only handles drawing, not data preparation.
+  if (!g_AutoUpdateEnabled) {
+    const uint32_t nowMs = millis();
+    g_NetState = DetectNetState(nowMs);
 
-  /* Handle BOOT0 button presses (active low) with debounce and cycle display behavior */
-  const uint8_t bootState = digitalRead(BOOT0_PIN);
-  if (bootState != g_BootLastState) {
-    g_BootLastChangeMs = nowMs;
-    g_BootLastState = bootState;
-  } else if ((nowMs - g_BootLastChangeMs) >= kBootDebounceMs) {
-    static bool bootHandled = false;
-    if (bootState == LOW && !bootHandled) {
-      /* Button pressed: cycle behavior */
-      if (g_DisplayBehavior == DisplayBehavior::SWAP) {
-        g_DisplayBehavior = DisplayBehavior::FIX_ENV;
-        g_Mode = DisplayMode::ENV_INFO;
-        SystemLog("Display behavior: FIX_ENV");
-      } else if (g_DisplayBehavior == DisplayBehavior::FIX_ENV) {
-        g_DisplayBehavior = DisplayBehavior::FIX_TIME;
-        g_Mode = DisplayMode::TIME_INFO;
-        SystemLog("Display behavior: FIX_TIME");
-      } else {
-        g_DisplayBehavior = DisplayBehavior::SWAP;
-        g_LastSwitchMs = nowMs;
-        SystemLog("Display behavior: SWAP");
+    // --- Handle button presses (active low) ---
+    const uint8_t bootState = digitalRead(CHANGE_MODE_PIN);
+    if (bootState != g_BootLastState) { // State changed
+      g_BootLastChangeMs = nowMs;
+      g_BootLastState = bootState;
+      if (bootState == LOW) { // Button was just pressed
+        g_BootPressStartMs = nowMs;
       }
-      bootHandled = true;
-    } else if (bootState == HIGH) {
-      bootHandled = false;
     }
+
+    // --- Process button events after debounce ---
+    if ((nowMs - g_BootLastChangeMs) >= kBootDebounceMs) {
+      // Long press check (held for 1s)
+      if (g_BootLastState == LOW && (nowMs - g_BootPressStartMs >= 1000)) {
+        SystemLog("Long press detected, entering OTA mode.");
+        Task_SetSystemState(eAPP_STAT_OTA);
+        g_BootPressStartMs = 0; // Prevent re-triggering
+        g_BootLastState = HIGH; // Fake a release to prevent short press
+      }
+      // Short press check (released before 1s)
+      else if (g_BootLastState == HIGH && g_BootPressStartMs != 0) {
+        SystemLog("Short press detected, changing run mode.");
+        if (currentState == eAPP_STAT_RUN_TDT) {
+          Task_SetSystemState(eAPP_STAT_RUN_TTH);
+        } else if (currentState == eAPP_STAT_RUN_TTH) {
+          Task_SetSystemState(eAPP_STAT_RUN_MIX);
+        } else if (currentState == eAPP_STAT_RUN_MIX) {
+          Task_SetSystemState(eAPP_STAT_RUN_TDT);
+        }
+        g_BootPressStartMs = 0; // Reset press timer
+      }
+    }
+
+    // --- Time synchronization ---
+    if (IsNtpTimeValid()) {
+      SyncInternalClockFromNtp();
+    } else if (DS1302_IsAvailable()) {
+      DS1302_GetTime(&g_InternalClock.year, &g_InternalClock.mon, &g_InternalClock.day, &g_InternalClock.hour, &g_InternalClock.min, &g_InternalClock.sec);
+    } else {
+      AdvanceInternalClock(nowMs);
+    }
+
+    // --- Update shared data buffer ---
+    UpdateDisplayData();
+  }
+  
+  // --- Drawing Stage ---
+  // Only redraw the screen if the content has actually changed.
+  if (DisplayData_IsChanged()) {
+    DrawScreenFromBuffer();
   }
 
-  /* Automatic switching only in SWAP mode */
-  if (g_DisplayBehavior == DisplayBehavior::SWAP) {
-    if ((nowMs - g_LastSwitchMs) >= modeDuration) {
-      g_Mode = (g_Mode == DisplayMode::ENV_INFO) ? DisplayMode::TIME_INFO : DisplayMode::ENV_INFO;
-      g_LastSwitchMs = nowMs;
-    }
-  }
+  return RET_OK;
+}
 
-  // Time synchronization priority: NTP > RTC > Internal Fallback
-  if (IsNtpTimeValid()) {
-    // Highest priority: NTP is valid, sync internal clock from it.
-    SyncInternalClockFromNtp();
-  } else if (DS1302_IsAvailable()) {
-    // Second priority: NTP not ready, but RTC is. Get time from RTC.
-    DS1302_GetTime(&g_InternalClock.year, &g_InternalClock.mon, &g_InternalClock.day, &g_InternalClock.hour, &g_InternalClock.min, &g_InternalClock.sec);
-  } else {
-    // Lowest priority: No external time source, advance the internal clock.
-    AdvanceInternalClock(nowMs);
+void Task2_SetAutoUpdate(bool enabled) {
+  g_AutoUpdateEnabled = enabled;
+}
+
+ReturnCode_t Task2_DrawScreenLine(uint8_t index, const char *text) {
+  if (index >= OLED_TEXT_LINE_COUNT) {
+    return RET_INVALID_ARG;
   }
 
   g_Display.firstPage();
   do {
     ApplyDisplayTheme();
+    g_Display.setFont(u8g2_font_ncenB10_tr);
+    g_Display.drawStr(OLED_TEXT_LINE_X[index], OLED_TEXT_LINE_Y[index], text);
+  } while (g_Display.nextPage());
 
-    if (g_Mode == DisplayMode::ENV_INFO) {
-      DrawEnvInfo();
-    } else {
-      DrawTimeInfo();
-    }
+  return RET_OK;
+}
+
+ReturnCode_t Task2_DrawBitmapScreen(uint8_t x, uint8_t y, uint8_t w, uint8_t h, const uint8_t *bitmap) {
+  if (bitmap == nullptr) {
+    return RET_INVALID_ARG;
+  }
+
+  g_Display.firstPage();
+  do {
+    ApplyDisplayTheme();
+    g_Display.drawXBM(x, y, w, h, bitmap);
+  } while (g_Display.nextPage());
+
+  return RET_OK;
+}
+
+ReturnCode_t Task2_FillScreen(bool color) {
+  g_Display.firstPage();
+  do {
+    g_Display.setDrawColor(color ? 1 : 0);
+    g_Display.drawBox(0, 0, g_Display.getDisplayWidth(), g_Display.getDisplayHeight());
+  } while (g_Display.nextPage());
+
+  return RET_OK;
+}
+
+ReturnCode_t Task2_DrawScreenLines(const char *lines[3]) {
+  g_Display.firstPage();
+  do {
+    ApplyDisplayTheme();
+    DrawLines(lines);
   } while (g_Display.nextPage());
 
   return RET_OK;

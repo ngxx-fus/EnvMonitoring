@@ -20,25 +20,33 @@ constexpr uint32_t kRtcNtpSyncIntervalMs = 60000;  // 1 minute
 ReturnCode_t Task4_Init(void) {
   g_Rtc.Begin();
 
-  if (!g_Rtc.IsDateTimeValid()) {
-    SystemWarn("DS1302: Invalid time, waiting for NTP sync.");
-    // Set a default time to signify it's running but needs sync
-    g_Rtc.SetDateTime(RtcDateTime(2000, 1, 1, 0, 0, 0));
+  // A simple and effective way to check for the DS1302's presence is to
+  // check if the clock is running, and if not, try to start it.
+  if (!g_Rtc.GetIsRunning()) {
+    SystemWarn("DS1302: RTC not running. Attempting to start...");
+    g_Rtc.SetIsRunning(true);
+    // If it's still not running after we tried to start it, the chip is not responding.
+    if (!g_Rtc.GetIsRunning()) {
+      SystemErr("DS1302: Failed to start RTC. Module not available.");
+      g_RtcOk = false;
+      // We return RET_OK because this is not a fatal error for the whole system.
+      // The application can continue without the RTC.
+      return RET_OK;
+    }
   }
+
+  // If we get here, we have successfully communicated with the chip.
+  g_RtcOk = true;
 
   if (g_Rtc.GetIsWriteProtected()) {
     SystemLog("DS1302: Disabling write protection.");
     g_Rtc.SetIsWriteProtected(false);
   }
 
-  if (!g_Rtc.GetIsRunning()) {
-    SystemWarn("DS1302: RTC was not running, starting now.");
-    g_Rtc.SetIsRunning(true);
+  if (!g_Rtc.IsDateTimeValid()) {
+    SystemWarn("DS1302: Invalid time, setting default and waiting for NTP sync.");
+    g_Rtc.SetDateTime(RtcDateTime(2026, 1, 1, 0, 0, 0));
   }
-
-  // At this point, the RTC module itself is responsive.
-  // We can consider it "OK" for providing time, even if the time is not yet NTP-synced.
-  g_RtcOk = true;
 
   RtcDateTime now = g_Rtc.GetDateTime();
   if (now.Year() < 2024) {
@@ -50,6 +58,10 @@ ReturnCode_t Task4_Init(void) {
 }
 
 ReturnCode_t Task4_Runtime(void) {
+  if (!g_RtcOk) {
+    return RET_OK; // Do nothing if RTC is not available
+  }
+
   const uint32_t nowMs = millis();
 
   // Periodically check if we need to sync RTC from NTP
@@ -74,7 +86,6 @@ ReturnCode_t Task4_Runtime(void) {
     SystemLog("DS1302: NTP time differs, updating RTC...");
     RtcDateTime ntpTime(ntpYear, g_Mon, g_Day, g_Hour, g_Min, g_Sec);
     g_Rtc.SetDateTime(ntpTime);
-    g_RtcOk = true;  // RTC is now considered OK
   }
 
   return RET_OK;
